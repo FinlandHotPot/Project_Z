@@ -11,7 +11,8 @@
 #include "GameFramework/Controller.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "Components/BoxComponent.h"
+#include "Components/BoxComponent.h" //武器碰撞体
+#include "Components/CableComponent.h" //绳索组件
 
 // Sets default values
 AHero_Main::AHero_Main()

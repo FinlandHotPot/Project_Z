@@ -1838,48 +1838,6 @@ void AHero_Main::CheckHeroGroundStatus()
 
 }
 
-
-
-
-
-
-
-{
-    if (CurrentMoveState == EMoveState::InAir && CurrentVelocity.Z <= 0)
-    {
-        
-        Super::CheckGroundStatus();
-        
-        
-        FVector Start = GetActorLocation();
-        FVector End = Start - FVector(0, 0, 100.0f);
-        
-        
-        FHitResult HitResult;
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(this);
-        
-        
-        bool bHit = (GetWorld()->LineTraceSingleByChannel(
-                                                          HitResult,
-                                                          Start,
-                                                          End,
-                                                          ECC_WorldStatic,
-                                                          QueryParams
-                                                          )
-                     );
-        {
-            float GroundAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(HitResult.Normal, FVector::UpVector)));
-            
-            if (GroundAngle > CollisionParams.WalkableFloorAngle)
-            {
-                //陡坡处理逻辑
-                //比如 应用向下推力防止卡住
-            }
-        }
-    }
-}
-
 //辅助函数：获取当前速度
 float AHero_Main::GetCurrentSpeed() const
 {

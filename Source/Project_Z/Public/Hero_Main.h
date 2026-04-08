@@ -217,7 +217,7 @@ struct FGlideParams
     float MaxGlideSpeed = 1200.0f; //最大滑翔速度
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Glide")
-    float GlideLifeForce = 300.0f; //升力系数
+    float GlideLiftForce = 300.0f; //升力系数
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Glide")
     float GlideDragCoefficient = 0.1f; //空气阻力系数
@@ -248,6 +248,12 @@ struct FSwingParams
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing")
     float RopeAttachSpeed = 2000.0f; //绳索附着速度
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing")
+    float TurnSensitivity = 100.0f; // 摆荡转向灵敏度
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Swing")
+    float MaxTurnRate = 200.0f; // 最大角速度限制
 };
 
 
@@ -257,7 +263,7 @@ struct FSwingParams
 USTRUCT(BlueprintType)
 struct FClimbParams
 {
-    GENERATED_BODY()
+    GENERATED_BODY();
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climb")
     float ClimbSpeed = 300.0f; //攀爬速度
@@ -283,7 +289,7 @@ struct FClimbParams
 USTRUCT(BlueprintType)
 struct FWeaponAttackParams
 {
-    GENERATED_BODY()
+    GENERATED_BODY();
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attack")
     float LightAttackDamage = 20.0f;
@@ -305,7 +311,7 @@ struct FWeaponAttackParams
 UCLASS()
 class PROJECT_Z_API AHero_Main : public ABaseCharacter
 {
-	GENERATED_BODY()
+	GENERATED_BODY();
 
 public:
 	// Sets default values for this pawn's properties
@@ -490,7 +496,7 @@ protected:
     
     /** 滑翔特效组件 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Component")
-    class UParticleSystemComponent* GlidePartieComp;
+    class UParticleSystemComponent* GlideParticleComp;
     
     /** 摆荡绳索组件 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Component")
@@ -607,7 +613,7 @@ protected:
     
     void CheckHeroGroundStatus();
     
-    bool CanStateGliding() const;
+    bool CanStartGliding() const;
     
     bool FindSwingAnchor(FVector& OutAnchorPoint);
     
@@ -646,7 +652,7 @@ protected:
     void DrawDebugInfo();
     
     /** 切换调试显示 */
-    void TaggleDebugDisplay();
+    void ToggleDebugDisplay();
     
     
 private:
@@ -691,6 +697,9 @@ private:
     
     /** 调试相关 */
     bool bShowDebugInfo = false;
+
+    /** 处理摆荡输入 */
+    void ProcessSwingInput(const FVector2D& Input);
     
     
     

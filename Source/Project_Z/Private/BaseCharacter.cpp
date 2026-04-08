@@ -90,8 +90,6 @@ void ABaseCharacter::SetCharacterState(ECharacterState NewState)
             FString StateName = UEnum::GetValueAsString(NewState);
             GEngine->AddOnScreenDebugMessage(-1,3.0f,FColor::White, FString::Printf(TEXT("角色状态改变: %s"),*StateName));
         }
-        //触发蓝图事件
-        OnCharacterStateChanged(NewState, PreviousState);
         
         //状态特定逻辑
         switch (NewState)
@@ -113,8 +111,30 @@ void ABaseCharacter::SetMoveState(EMoveState NewState)
         EMoveState PreviousState = CurrentMoveState;
         CurrentMoveState = NewState;
         
-        OnMoveStateChanged(NewState, PreviousState);
     }
+}
+
+void ABaseCharacter::OnCharacterStateChanged_Implementation(ECharacterState NewState, ECharacterState PreviousState)
+{
+    // 默认实现
+    UE_LOG(LogTemp, Verbose, TEXT("[%s] 角色状态从 %s 变为 %s"),
+        *GetName(),
+        *UEnum::GetValueAsString(PreviousState),
+        *UEnum::GetValueAsString(NewState));
+    
+    // 可以在这里添加其他默认逻辑，比如：
+    // - 播放状态改变音效
+    // - 更新UI提示
+    // - 触发其他系统事件
+}
+
+void ABaseCharacter::OnMoveStateChanged_Implementation(EMoveState NewState, EMoveState PreviousState)
+{
+    // 默认实现
+    UE_LOG(LogTemp, Verbose, TEXT("[%s] 移动状态从 %s 变为 %s"),
+        *GetName(),
+        *UEnum::GetValueAsString(PreviousState),
+        *UEnum::GetValueAsString(NewState));
 }
 
 // ==================================================

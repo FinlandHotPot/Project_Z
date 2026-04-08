@@ -77,17 +77,19 @@ struct FCharacterAttributes
 {
     GENERATED_BODY()
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes")
     float MaxHealth = 100.0f;   //主角生命值
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes")
     float CurrentHealth = 100.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes")
     float MaxStamina = 100.0f;  //能量绿条 （限制无限瞎滚）
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CurrentStamia = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes")
+    float CurrentStamina = 100.0f;
+
+    FCharacterAttributes() : CurrentStamina(100.0f), MaxStamina(100.0f), CurrentHealth(100.0f), MaxHealth(100.0f) {}
     
     // 可扩展至 护甲， 能量，经验值等
 };
@@ -241,10 +243,10 @@ protected:
     virtual void OnDeath();
     
     //状态改变事件 （蓝图可实现）
-    UFUNCTION(BlueprintImplementableEvent, Category = "Character|Events")
+    UFUNCTION(BlueprintNativeEvent, Category = "Character|Events")
     void OnCharacterStateChanged(ECharacterState NewState, ECharacterState PreviousState);
     
-    UFUNCTION(BlueprintImplementableEvent, Category = "Character|Events")
+    UFUNCTION(BlueprintNativeEvent, Category = "Character|Events")
     void OnMoveStateChanged(EMoveState NewState, EMoveState PreviousState);
     
     

@@ -12,9 +12,9 @@
 #include "DrawDebugHelpers.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Components/BoxComponent.h" //武器碰撞体
-#include "Components/CableComponent.h" //绳索组件
-#include "Particles/ParticlesSystemComponent.h" //粒子系统
-#include "Kismet/GameplayStatic.h" //游戏工具
+#include "CableComponent.h" //绳索组件
+#include "Particles/ParticleSystemComponent.h" //粒子系统
+#include "Kismet/GameplayStatics.h" //游戏工具
 #include "TimerManager.h" //定时器
 
 
@@ -48,7 +48,7 @@ AHero_Main::AHero_Main()
     
     // 5.武器碰撞体组件
     WeaponCollisionComp = CreateDefaultSubobject<UBoxComponent>(TEXT("WeaponCollision"));
-    WeaponCollisionComp->SetupAttachment(MeshComp, TEXT(hand_r)); //附加到右手骨骼
+    WeaponCollisionComp->SetupAttachment(MeshComp, TEXT("hand_r")); //附加到右手骨骼
     WeaponCollisionComp->SetBoxExtent(FVector(5.0f, 5.0f, 50.0f));
     WeaponCollisionComp->SetCollisionProfileName(TEXT("NoCollision")); //初始无碰撞
     WeaponCollisionComp->SetHiddenInGame(true); //游戏中隐藏
@@ -57,7 +57,7 @@ AHero_Main::AHero_Main()
     //6.滑翔特效组件
     GlideParticleComp = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("GlideParticle"));
     GlideParticleComp->SetupAttachment(RootComponent);
-    GlideParticleComp->bAutoActive = false;
+    GlideParticleComp->bAutoActivate = false;
 
     //7.摆荡绳索组件
     RopeCableComp = CreateDefaultSubobject<UCableComponent>(TEXT("RopeCable"));
@@ -65,7 +65,7 @@ AHero_Main::AHero_Main()
     RopeCableComp->SetHiddenInGame(true);
     RopeCableComp->CableLength = 1000.0f;
     RopeCableComp->NumSegments = 10;
-    RopeCableComp->CableWith = 5.0f;
+    RopeCableComp->CableWidth = 5.0f;
 
 
     // --- 初始化默认参数值 （与头文件声明保持一致）---
@@ -75,6 +75,7 @@ AHero_Main::AHero_Main()
     HeroAttributes = FHeroAttributes();
     HeroPhysicsParams = FHeroPhysicsParams();
     CollisionParams = FCollisionResolutionParams();
+    Attributes = FCharacterAttributes();
 
     GlideParams = FGlideParams();
     SwingParams = FSwingParams();
@@ -86,6 +87,7 @@ AHero_Main::AHero_Main()
     CurrentSpeedState = ESpeedState::Jogging;
     CurrentTargetingState = ETargetingState::FreeCamera;
     
+    CurrentCharacterState = ECharacterState::Idle;
     CurrentAdvancedMoveMode = EAdvancedMoveState::None;
     CurrentAttackComboState = EAttackComboState::Ready;
     CurrentWeaponType = EWeaponType::Sword;
@@ -112,7 +114,7 @@ void AHero_Main::BeginPlay()
     //绑定武器碰撞体重叠事件
     // ====================
 
-    if (WeaponCollision)
+    if (WeaponCollisionComp)
     {
         WeaponCollisionComp->OnComponentBeginOverlap.AddDynamic(this, &AHero_Main::OnWeaponOverlapBegin);
     }
@@ -123,10 +125,34 @@ void AHero_Main::BeginPlay()
     //调试信息
     if (GEngine)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("英雄角色初始化完成-增强版本"))
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("英雄角色初始化完成-增强版本"));
     }
 }
 
+void AHero_Main::RecoverStaminaOverTime(float DeltaTime)
+{
+    // 只有在非战斗状态且一段时间没有消耗耐力才恢复
+    if (CurrentCharacterState != ECharacterState::Combat &&
+        CurrentSpeedState != ESpeedState::Sprinting &&
+        CurrentAdvancedMoveMode != EAdvancedMoveState::Gliding &&
+        CurrentAdvancedMoveMode != EAdvancedMoveState::Swinging &&
+        CurrentAdvancedMoveMode != EAdvancedMoveState::Climbing)
+    {
+        StaminaRecoveryTimer += DeltaTime;
+
+        if (StaminaRecoveryTimer >= StaminaRecoveryDelay)
+        {
+            // 每秒恢复10点耐力
+            float RecoveryAmount = 10.0f * DeltaTime;
+            RecoveryStamina(RecoveryAmount);
+        }
+    }
+    else
+    {
+        // 在消耗耐力的状态下，重置计时器
+        StaminaRecoveryTimer = 0.0f;
+    }
+}
 
 
 // Called every frame
@@ -145,8 +171,8 @@ void AHero_Main::Tick(float DeltaTime)
     UpdateSpeedState();
     CheckGroundStatus();
 
-    RecoverStaminaOverTime(DeltaTime)
-    RecoverPostureOverTime(DeltaTime)
+    RecoverStaminaOverTime(DeltaTime);
+    RecoverPostureOverTime(DeltaTime);
 
     //更新连段计时器
     if (CurrentAttackComboState != EAttackComboState::Ready)
@@ -165,14 +191,14 @@ void AHero_Main::Tick(float DeltaTime)
         if (ParryWindowTimer >= CombatParams.ParryWindowSeconds)
         {
             bIsInParryWindow = false;
-            ParryWindowTimer = 0,0F
+            ParryWindowTimer = 0.0f;
         }
     }
 
     //更新蓄力计时器
     if (CurrentAttackComboState == EAttackComboState::HeavyCharge)
     {
-        HeavyCharge +=DeltaTime;
+        HeavyChargeTime +=DeltaTime;
     }
 
     //更新滑翔特效
@@ -192,17 +218,17 @@ void AHero_Main::Tick(float DeltaTime)
     if (CurrentAdvancedMoveMode == EAdvancedMoveState::Swinging && RopeCableComp)
     {
         RopeCableComp->SetHiddenInGame(false);
-        RopeCableComp->SetAttachEndTo(this, Name_None, TEXT("spine_03")); //附加到脊椎
+        RopeCableComp->SetAttachEndTo(this, NAME_None, TEXT("spine_03")); //附加到脊椎
         RopeCableComp->EndLocation = SwingAnchorPoint - GetActorLocation();
     }
     else if (RopeCableComp && !RopeCableComp->bHiddenInGame)
     {
-        RopeCableComp->SetHiddenInGame(true)
+        RopeCableComp->SetHiddenInGame(true);
     }
 
     if (bShowDebugInfo)
     {
-        DrawDebuginfo();
+        DrawDebugInfo();
     }
 
     
@@ -320,7 +346,7 @@ void AHero_Main::MoveInput(const FInputActionValue& Value)
         
         
         //调用基类的移动函数
-        Super::Move(MoveDirection, 1.0f);
+        ABaseCharacter::Move(MoveDirection, 1.0f);
         
         //更新水平速度（用于动画等）
         HorizontalSpeed = MoveDirection.Size() * GetCurrentSpeed();
@@ -346,7 +372,7 @@ void AHero_Main::Look(const FInputActionValue& Value)
 void AHero_Main::JumpStart(const FInputActionValue& Value)
 {
     //调用基类的跳跃函数
-    Super::Jump();
+    ABaseCharacter::Jump();
     
     //在此添加主角特有的跳跃逻辑
     if (GEngine)
@@ -359,7 +385,7 @@ void AHero_Main::JumpEnd(const FInputActionValue& Value)
         
 {
     //调用基类的跳跃函数
-    Super::StopJump();
+    ABaseCharacter::StopJump();
 }
     
 // SPRINT
@@ -422,7 +448,7 @@ void AHero_Main::StartAttack()
     ActivateWeaponCollision();
 
     //更新连段状态
-    UpdateAttackCombo(flase);
+    UpdateAttackCombo(false);
 
     //记录攻击时间
     LastAttackTime =GetWorld()->GetTimeSeconds();
@@ -432,7 +458,7 @@ void AHero_Main::StartAttack()
 
     if (GEngine)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor:Red,
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red,
             FString::Printf(TEXT("开始攻击-连段：%s"),
             *UEnum::GetValueAsString(CurrentAttackComboState)));
     }
@@ -443,7 +469,7 @@ void AHero_Main::StartAttack()
 
 void AHero_Main::PerformLightAttack(const FInputActionValue& Value)
 {
-    Super::StartAttack();
+    ABaseCharacter::StartAttack();
     
     StartAttack();
     
@@ -492,7 +518,7 @@ void AHero_Main::ReleaseHeavyAttack()
         CurrentAttackComboState = EAttackComboState::HeavyRelease;
 
         //触发蓝图事件
-        OnAttackComboChanged(CurrentAttackComboState):
+        OnAttackComboChanged(CurrentAttackComboState);
 
         //激活武器碰撞体
         ActivateWeaponCollision();
@@ -504,30 +530,71 @@ void AHero_Main::ReleaseHeavyAttack()
         AlreadyHitActors.Empty();
         
         //消耗耐力
-        ConsumeStamina(30.0f)
+        ConsumeStamina(30.0f);
 
-        if (GEngine0
+        if (GEngine)
             {
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor:Red,
+                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red,
                     FString::Printf(TEXT("释放重攻击-蓄力时间：%.2f秒"), HeavyChargeTime));
             }
 
     }
 }
 
+void AHero_Main::CheckAttackHit()
+{
+    if (WeaponCollisionComp && WeaponCollisionComp->GetGenerateOverlapEvents())
+    {
+        //检查武器碰撞的重叠
+        TArray<AActor*>OverlappingActors;
+        WeaponCollisionComp->GetOverlappingActors(OverlappingActors);
+
+        for (AActor* Actor : OverlappingActors)
+        {
+            // 处理命中逻辑
+        }
+    }
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::Yellow, TEXT("检查攻击命中"));
+    }
+}
+
+void AHero_Main::CheckHeroGroundStatus()
+{
+    ABaseCharacter::CheckGroundStatus();
+
+    if (GEngine && bShowDebugInfo)
+    {
+        FString StateText = FString::Printf(TEXT("地面状态: %s"),
+        *UEnum::GetValueAsString(CurrentMoveState));
+        GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan, StateText);
+
+    }
+}
+
+void AHero_Main::ToggleDebugDisplay()
+{
+    bShowDebugInfo = !bShowDebugInfo;
+
+    if (GEngine)
+    {
+        FString Message = FString::Printf(TEXT("调试信息: %s"), 
+        bShowDebugInfo ? TEXT("开启") : TEXT("关闭"));
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, Message);
+    }
+}
+
 void AHero_Main::ActivateWeaponCollision()
 {
-    if (WeaponCollision)
+    if (WeaponCollisionComp)
     {
         WeaponCollisionComp->SetCollisionProfileName(TEXT("Weapon"));
         WeaponCollisionComp->SetGenerateOverlapEvents(true);
 
         //设置定时器，0.3秒后自动停用
         FTimerHandle TimeHandle;
-        GetWorld()->GetTimeManager().SetTimer(TimerHandle, [this]()
-        {
-            DeactivateWeaponCollision();
-        }
+        GetWorld()->GetTimerManager().SetTimer(TimeHandle, this, &AHero_Main::DeactivateWeaponCollision, 0.3f, false);
 
     } 
 
@@ -536,7 +603,7 @@ void AHero_Main::ActivateWeaponCollision()
 
 void AHero_Main::DeactivateWeaponCollision()
 {
-    if (WeaponCollision)
+    if (WeaponCollisionComp)
     {
         WeaponCollisionComp->SetCollisionProfileName(TEXT("NoCollision"));
         WeaponCollisionComp->SetGenerateOverlapEvents(false);
@@ -557,7 +624,7 @@ void AHero_Main::OnWeaponOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
         //检查是否已经命中过这个目标
         if (AlreadyHitActors.Contains(OtherActor))
         {
-            return
+            return;
         }
 
         //尝试转换为BaseCharacter
@@ -645,7 +712,7 @@ void AHero_Main::UpdateAttackCombo(bool bIsHeavyAttack)
     else
     {
         //轻攻击连段
-        switch (CurrentAttackComboState）
+        switch (CurrentAttackComboState)
             {
                 case EAttackComboState::Ready:
                 CurrentAttackComboState = EAttackComboState::Light1;
@@ -663,7 +730,7 @@ void AHero_Main::UpdateAttackCombo(bool bIsHeavyAttack)
                 CurrentAttackComboState = EAttackComboState::Finisher;
                 break; 
 
-                default
+                default:
                 CurrentAttackComboState = EAttackComboState::Light1;
                 break; 
             }
@@ -691,7 +758,7 @@ void AHero_Main::ResetAttackCombo()
 void AHero_Main::PerformParry(const FInputActionValue& Value)
 {
     //调用基类的开始防御函数
-    Super::StartDefend();
+    ABaseCharacter::StartDefend();
     
     //激活弹反窗口
     bIsInParryWindow = true;
@@ -769,7 +836,7 @@ void AHero_Main::ConsumeStamina(float Amount)
 {
     if (Amount > 0.0f)
     {
-        Attributes.CurrentStamina = FMath::Math(0.0F, Attributes.CurrentStamina - Amount);
+        Attributes.CurrentStamina = FMath::Max<float>(0.0F, Attributes.CurrentStamina - Amount);
 
         //重置耐力恢复计时器
         StaminaRecoveryTimer = 0.0f;
@@ -797,11 +864,11 @@ void AHero_Main::ConsumeStamina(float Amount)
     }
 }
 
-void AHero_Main::RecoveryStamina(float Amount)
+void AHero_Main::RecoverStamina(float Amount)
 {
     if (Amount > 0.0f)
     {
-        Attributes.CurrentStamina = FMath::Min(Attributes.MaxStamina, Attributes.CurrentStamina + Amount);
+        Attributes.CurrentStamina = FMath::Min<float>(Attributes.MaxStamina, Attributes.CurrentStamina + Amount);
     }
 }
 
@@ -809,7 +876,7 @@ void AHero_Main::RecoverPosture(float Amount)
 {
     if (Amount > 0.0f)
     {
-        HeroAttributes.CurrentPosture = FMath::Min(HeroAttributes.MaxPosture, HeroAttributes.CurrentPosture + Amount);
+        HeroAttributes.CurrentPosture = FMath::Min<float>(HeroAttributes.MaxPosture, HeroAttributes.CurrentPosture + Amount);
     }
 }
 
@@ -829,7 +896,7 @@ void AHero_Main::RecoverPostureOverTime(float DeltaTime)
         {
             //每秒恢复10点耐力
             float RecoveryAmount = 10.0f * DeltaTime;
-            RecoveryStamina(RecoveryAmount);
+            RecoverStamina(RecoveryAmount);
         }
     }
     else
@@ -837,11 +904,7 @@ void AHero_Main::RecoverPostureOverTime(float DeltaTime)
         //在消耗耐力的状态下，重置计时器
         StaminaRecoveryTimer = 0.0f;
     }
-}
 
-
-void AHero_Main::RecoverPostureOverTime(float DeltaTime)
-{
     //只有在非战斗状态时恢复架势
     if (CurrentCharacterState != ECharacterState::Combat)
     {
@@ -861,7 +924,7 @@ bool AHero_Main::HasEnoughStamina(float RequiredAmount)const
 // --- 调试与可视化 ---
 // ==================================================
 
-void AHero_Main::DrawDebuginfo()
+void AHero_Main::DrawDebugInfo()
 {
     if (!GetWorld())
     {
@@ -873,8 +936,8 @@ void AHero_Main::DrawDebuginfo()
 
     //绘制状态信息
     FString StateInfo = FString::Printf(TEXT(
-        "状态：%\n"
-        "移动模式：%\n"
+        "状态：%s\n"
+        "移动模式：%s\n"
         "速度：%.1f\n"
         "耐力：%.1f/%.1f\n"
         "架势：%.1f/%.1f\n"
@@ -893,7 +956,7 @@ void AHero_Main::DrawDebuginfo()
 GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::White, StateInfo);
 
 //绘制速度向量
-DrawDebugDirectionlArrow(GetWorld(), ActorLocation,
+DrawDebugDirectionalArrow(GetWorld(), ActorLocation,
 ActorLocation + CurrentVelocity.GetSafeNormal() * 100.0f,
 50.0f, FColor::Cyan, false, 0.0f, 0, 2.0f);
 
@@ -902,7 +965,7 @@ if (WeaponCollisionComp && WeaponCollisionComp->GetGenerateOverlapEvents())
 {
     FVector WeaponLoc = WeaponCollisionComp->GetComponentLocation();
     float Radius = WeaponCollisionComp->GetScaledBoxExtent().X;
-    DrawDebugSphere(GetWorld(), WeaponLoc, Radius, 12, FColor::Red, flase, 0.0f, 0, 1.0f);
+    DrawDebugSphere(GetWorld(), WeaponLoc, Radius, 12, FColor::Red, false, 0.0f, 0, 1.0f);
 }
 
 
@@ -1017,7 +1080,7 @@ void AHero_Main::SetAdvancedMoveMode(EAdvancedMoveState NewMode)
 void AHero_Main::ApplyHeroPhysics(float DeltaTime)
 {
     //首先调用基类的物理逻辑
-    Super::ApplyHeroPhysics(DeltaTime);
+    ABaseCharacter::ApplyBasePhysics(DeltaTime);
 
     //高级移动模式的特殊物理处理
     //================================================
@@ -1036,7 +1099,7 @@ void AHero_Main::ApplyHeroPhysics(float DeltaTime)
 
         case EAdvancedMoveState::Climbing:
         //攀爬物理：在墙壁上移动
-        ApplyHeroPhysics(DeltaTime)
+        ApplyHeroPhysics(DeltaTime);
         break;
 
         case EAdvancedMoveState::WallRunning:
@@ -1049,7 +1112,7 @@ void AHero_Main::ApplyHeroPhysics(float DeltaTime)
         //TODO:实现滑铲物理
         break;
 
-        default
+        default:
         //普通移动物理处理
         break;
     }
@@ -1068,18 +1131,18 @@ void AHero_Main::ApplyHeroPhysics(float DeltaTime)
 
     //滑翔自动检测
     if (CurrentMoveState == EMoveState::InAir &&
-        CurrentAdvanceMoveMode == EAdvancedMoveState:: &&
+        CurrentAdvancedMoveMode == EAdvancedMoveState::None &&
         CanStartGliding())
         {
             //自动开始滑翔
-            startGliding();
+            StartGliding();
         }
     
  }
 
 
 // ==================================================
-// --- 新增滑翔物理计算 ---
+// --- 滑翔物理计算 ---
 // ==================================================
 
 void AHero_Main::ApplyGlidePhysics(float DeltaTime)
@@ -1088,7 +1151,7 @@ void AHero_Main::ApplyGlidePhysics(float DeltaTime)
     FVector HorizontalVelocity = FVector(CurrentVelocity.X, CurrentVelocity.Y, 0.0f);
 
     //应用滑翔转向
-    if (FMath::Abs(CurrentGlideTurn) > 0.1)
+    if (FMath::Abs(CurrentGlideTurn) > 0.1f)
     {
         FRotator TurnRotation(0.0f, CurrentGlideTurn * GlideParams. TurnRate * DeltaTime, 0.0f);
         HorizontalVelocity = TurnRotation.RotateVector(HorizontalVelocity);
@@ -1102,11 +1165,11 @@ void AHero_Main::ApplyGlidePhysics(float DeltaTime)
     }
 
     //应用升力（抵消部分重力）
-    float CurrentDescentRate = HeroPhysicsParam.GlideDescentRate;
-    CurrentDescentRate += GlideParams.GlideliftForce * (HorizontalSpeed / GlideParams.MaxGlideSpeed);
+    float CurrentDescentRate = HeroPhysicsParams.GlideDescentRate;
+    CurrentDescentRate += GlideParams.GlideLiftForce * (HorizontalSpeed / GlideParams.MaxGlideSpeed);
 
     //应用空气阻力
-    HorizontalVelocity *= (1.0f -GlideParams.GlideDragCofficient * DeltaTime);
+    HorizontalVelocity *= (1.0f -GlideParams.GlideDragCoefficient * DeltaTime);
 
     //更新速度
     CurrentVelocity.X = HorizontalVelocity.X;
@@ -1114,7 +1177,7 @@ void AHero_Main::ApplyGlidePhysics(float DeltaTime)
     CurrentVelocity.Z = CurrentDescentRate;
 
     //更新计时器
-    GldieTimer += DeltaTime;
+    GlideTimer += DeltaTime;
 
     //滑翔消耗耐力
     ConsumeStamina(5.0f * DeltaTime);
@@ -1135,13 +1198,13 @@ void AHero_Main::ApplySwingPhysics(float DeltaTime)
 {
     //计算绳索方向
     FVector RopeDirection = SwingAnchorPoint - GetActorLocation();
-    float CurrentRopeLength = RopeDirection.size();
+    float CurrentRopeLength = RopeDirection.Size();
 
     //规范化方向
     RopeDirection.Normalize();
 
     //计算摆荡角度（相对于垂直向下方向）
-    FVector DownVector = FVector(0.0f, 0.0f, -1,0f)
+    FVector DownVector = FVector(0.0f, 0.0f, -1.0f);
     CurrentSwingAngle = FMath::Acos(FVector::DotProduct(RopeDirection, DownVector));
     CurrentSwingAngle = FMath::RadiansToDegrees(CurrentSwingAngle);
 
@@ -1159,7 +1222,7 @@ void AHero_Main::ApplySwingPhysics(float DeltaTime)
 
     //计算摆荡物理（简化的单摆运动)
     float GravityAcceleration = 980.0f * PhysicsParams.GravityScale * SwingParams.SwingGravityScale;
-    float AngularAcceleration = -(GravityAccelerationv / RopeLength) * FMath::sin(FMath::DegreesToRadians(CurrentSwingAngle));
+    float AngularAcceleration = -(GravityAcceleration / RopeLength) * FMath::Sin(FMath::DegreesToRadians(CurrentSwingAngle));
 
     //角速度
     SwingAngularVelocity += AngularAcceleration * DeltaTime;
@@ -1171,7 +1234,7 @@ void AHero_Main::ApplySwingPhysics(float DeltaTime)
     CurrentSwingAngle += SwingAngularVelocity * DeltaTime;
 
     //计算切线角度方向
-    FVector TagentDirection = FVector::CrossProduct(RopeDirection, FVector::UpVector);
+    FVector TangentDirection = FVector::CrossProduct(RopeDirection, FVector::UpVector);
     TangentDirection.Normalize();
 
     //计算线速度
@@ -1212,10 +1275,10 @@ void AHero_Main::ApplyClimbPhysics(float DeltaTime)
     if (ClimbInput.SizeSquared() > 0.1f)
     {
         //将2D输入转换为墙壁3D方向
-        FVector ClimbMoveDirection = FVector::ZeroVector(ClimbWallNormal, FVector::UpVector);
+        FVector RightDirection = FVector::CrossProduct(ClimbWallNormal, FVector::UpVector);
         RightDirection.Normalize();
 
-        ClimbMoveDirection = (RightDirection * ClimbInput.X) + (FVector::UpVector * Climbinput.Y);
+        ClimbMoveDirection = (RightDirection * ClimbInput.X) + (FVector::UpVector * ClimbInput.Y);
         ClimbMoveDirection.Normalize();
 
         //应用攀爬速度
@@ -1288,10 +1351,10 @@ void AHero_Main::CheckParkourFront()
 }
 
 
-void AHero_Main::StartClimbing(Const FVector& WallLocation, const FVector& WallNormal)
+void AHero_Main::StartClimbing(const FVector& WallLocation, const FVector& WallNormal)
 {
     //设置攀爬状态
-    SetAdvancedMoveMode(EAdvancedMoveState:Climbing)
+    SetAdvancedMoveMode(EAdvancedMoveState::Climbing);
 
     //保存墙壁信息
     ClimbWallNormal = WallNormal;
@@ -1322,12 +1385,12 @@ void AHero_Main::StartClimbing(Const FVector& WallLocation, const FVector& WallN
 
     if (GEngine)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("开始攀爬墙壁"))；
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("开始攀爬墙壁"));
     }
 
 }
 
-void AHero_Main::StopClimbing = 1.0f;
+void AHero_Main::StopClimbing()
 {
     //恢复重力
     PhysicsParams.GravityScale = 1.0f;
@@ -1362,7 +1425,7 @@ void AHero_Main::ClimbJump()
     if (CurrentAdvancedMoveMode == EAdvancedMoveState::Climbing)
     {
         //计算跳跃方向（远离墙壁）
-        FVector JumpDirection = =ClimbWallNormal;
+        FVector JumpDirection = -ClimbWallNormal;
         JumpDirection.Z = 0.5f; // 向上成分
 
         JumpDirection.Normalize();
@@ -1391,7 +1454,7 @@ void AHero_Main::MantleLedge()
         bIsMantling = true;
 
         //计算攀上的位置
-        FVector MantleLocation == CurrentClimbLocation;
+        FVector MantleLocation = CurrentClimbLocation;
         MantleLocation += ClimbWallNormal * -100.0f; //向后移动
         MantleLocation.Z += 150.0f; //向上移动
 
@@ -1432,7 +1495,7 @@ void AHero_Main::StartGliding()
             //初始化滑翔变量
             GlideVelocity = CurrentVelocity;
             CurrentGlideTurn = 0.0f;
-            GldieTimer = 0.0f;
+            GlideTimer = 0.0f;
 
             //保持当前水平速度
             float InitialSpeed = FVector(CurrentVelocity.X, CurrentVelocity.Y, 0.0f).Size();
@@ -1440,14 +1503,14 @@ void AHero_Main::StartGliding()
             {
                 //如果速度太慢， 给予初始速度
                 FVector ForwardDir = GetActorForwardVector();
-                CurrentVelocity = ForwardDir * 300.0f
+                CurrentVelocity = ForwardDir * 300.0f;
             }
             //触发蓝图事件
-            OnStartClimbing();
+            OnStartGliding();
 
             if (GEngine)
             {
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan, text("开始滑翔"));
+                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan, TEXT("开始滑翔"));
             }
         }
 }
@@ -1473,7 +1536,7 @@ void AHero_Main::StopGliding()
 }
 
 
-void AHero_Main::GlideTurnInput(float TurnValue)
+void AHero_Main::GlidingTurnInput(float TurnValue)
 {
     if (CurrentAdvancedMoveMode == EAdvancedMoveState::Gliding)
     {
@@ -1486,7 +1549,7 @@ bool AHero_Main::CanStartGliding() const
 {
     //检查高度是否足够
     FVector Start = GetActorLocation();
-    FVector End = Start - FVector(0, 0, GlideParams.MinHeightToStart)
+    FVector End = Start - FVector(0, 0, GlideParams.MinHeightToStart);
 
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
@@ -1519,7 +1582,7 @@ bool AHero_Main::CanStartGliding() const
 void AHero_Main::StartSwinging(const FVector& AnchorPoint)
 {
     if (CurrentAdvancedMoveMode == EAdvancedMoveState::None &&
-        CurrentMovementState == EMoveState::InAir &&
+        CurrentMoveState == EMoveState::InAir &&
         HasEnoughStamina(30.0f))
         {
             //设置摆荡状态
@@ -1539,7 +1602,7 @@ void AHero_Main::StartSwinging(const FVector& AnchorPoint)
             RopeDirection.Normalize();
 
             FVector DownVector = FVector(0.0f, 0.0f, -1.0f);
-            CurrentSwingAngle = FMath::AcoS(FVector::DotProduct(RopeDirection, DownVector));
+            CurrentSwingAngle = FMath::Acos(FVector::DotProduct(RopeDirection, DownVector));
             CurrentSwingAngle = FMath::DegreesToRadians(CurrentSwingAngle);
 
             //触发蓝图事件
@@ -1557,7 +1620,7 @@ void AHero_Main::StopSwinging()
     if (CurrentAdvancedMoveMode == EAdvancedMoveState::Swinging)
     {
         //退出摆荡状态
-        SetAdvancedMoveMode(EAdvancedMoveState::Mone);
+        SetAdvancedMoveMode(EAdvancedMoveState::None);
 
         //给予脱离速度(当前摆动方向）
         CurrentVelocity = SwingVelocity * 1.5f;
@@ -1578,16 +1641,26 @@ void AHero_Main::StopSwinging()
     }
 }
 
+void AHero_Main::SwingingTurnInput(float TurnValue)
+{
+    FVector2D SwingInputVector(TurnValue, 0.0f); // 将一维的转向输入转换为二维向量。
+    ProcessSwingInput(SwingInputVector); // 调用一个内部函数来处理实际的摆荡输入逻辑。
+}
 
-void AHero_Main::SwingInput(const FVector2D& Input)
+void AHero_Main::ProcessSwingInput(const FVector2D& Input)
 {
     if (CurrentAdvancedMoveMode == EAdvancedMoveState::Swinging)
     {
-        //根据输入增加角速度（玩家可以控制摆动）
-        SwingAngularVelocity += Input.X * 100.0f * GetWorld()->GetDeltaSeconds();
+        // 使用Input.X控制左右摆荡的角速度
+        SwingAngularVelocity += Input.X * SwingParams.TurnSensitivity * GetWorld()->GetDeltaSeconds();
+        // 限制最大角速度
+        SwingAngularVelocity = FMath::Clamp(SwingAngularVelocity, -SwingParams.MaxTurnRate, SwingParams.MaxTurnRate);
 
-        //限制最大角速度
-        SwingAngularVelocity = FMath::Clamp(SwingAngularVelocity, -200.0f, 200.0f);
+        if (GEngine && bShowDebugInfo)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan,
+                FString::Printf(TEXT("摆荡输入: (%.2f, %.2f), 角速度: %.2f"), Input.X, Input.Y, SwingAngularVelocity));
+        }
     }
 }
 
@@ -1648,7 +1721,7 @@ void AHero_Main::UpdateSpeedState()
 
 void AHero_Main::CheckHeroGroundStatus()
 {
-    Super::CheckGroundStatus();
+    ABaseCharacter::CheckGroundStatus();
 
     if (CurrentMoveState == EMoveState::Grounded)
     {
@@ -1850,3 +1923,17 @@ float AHero_Main::GetCurrentSpeed() const
     }
 }
 
+// ==================================================
+// --- 蓝图实现 ---
+// ==================================================
+
+void AHero_Main::OnStartGliding_Implementation() {}
+void AHero_Main::OnStopGliding_Implementation() {}
+void AHero_Main::OnStartSwinging_Implementation() {}
+void AHero_Main::OnStopSwinging_Implementation() {}
+void AHero_Main::OnStartClimbing_Implementation() {}
+void AHero_Main::OnStopClimbing_Implementation() {}
+void AHero_Main::OnMantleLedge_Implementation() {}
+void AHero_Main::OnAttackComboChanged_Implementation(EAttackComboState NewComboState) {}
+void AHero_Main::OnSuccessfulHit_Implementation(ABaseCharacter* Target, float Damage) {}
+void AHero_Main::OnSuccessfulParry_Implementation() {}
